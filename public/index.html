@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>抖音视频工具 by 以太Max</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="panel">
+        <div class="topbar">
+          <div class="traffic" aria-hidden="true">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+          </div>
+        </div>
+
+        <header class="header">
+          <h1>抖音视频工具 <span>by 以太Max</span></h1>
+        </header>
+
+        <form class="inputRow" id="toolForm">
+          <input
+            id="urlInput"
+            name="url"
+            type="text"
+            autocomplete="off"
+            placeholder="粘贴抖音链接或分享文案"
+            required
+          />
+        </form>
+
+        <div class="actions">
+          <button class="primary" id="downloadBtn" type="button">
+            <span class="icon">↓</span>
+            <span>下载原视频</span>
+          </button>
+          <button class="secondary" id="extractBtn" type="button">
+            <span class="icon">T</span>
+            <span>提取文案</span>
+          </button>
+        </div>
+
+        <section class="status" id="statusBox" aria-live="polite">
+          <span class="pulse"></span>
+          <span id="statusText">就绪</span>
+        </section>
+
+        <section class="result" id="resultPanel" hidden>
+          <div class="summaryCard" id="summaryCard">
+            <div class="badges">
+              <span class="badge">douyin</span>
+              <span class="badge purple" id="resultBadge">已解析</span>
+            </div>
+            <h2 id="resultTitle">结果</h2>
+            <p id="resultMeta">等待处理</p>
+          </div>
+
+          <div class="workspace">
+            <section class="mediaCard" id="mediaCard" hidden>
+              <div class="cardHeader">
+                <h2>视频</h2>
+              </div>
+              <div class="videoFrame" id="videoFrame">
+                <div class="skeleton mediaSkeleton" id="mediaSkeleton"></div>
+                <video id="videoPreview" controls playsinline hidden></video>
+              </div>
+              <div class="cardActions">
+                <a class="ghost actionLink" id="downloadVideoLink" href="#" target="_blank" hidden>下载视频</a>
+                <button class="primary compact" id="extractFromVideoBtn" type="button" hidden>提取文案</button>
+              </div>
+            </section>
+
+            <section class="textCard">
+              <div class="cardHeader">
+                <h2>视频文案</h2>
+                <button class="copy" id="copyBtn" type="button" hidden>复制文案</button>
+              </div>
+              <div class="transcriptBox" id="transcriptBox">
+                <div class="extractOverlay" id="extractOverlay" hidden>
+                  <div class="breathRing">
+                    <span id="progressPercent">0%</span>
+                  </div>
+                  <p>正在提取文案</p>
+                </div>
+                <textarea id="copyText" readonly spellcheck="false" placeholder="提取后的文案会显示在这里"></textarea>
+              </div>
+            </section>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
