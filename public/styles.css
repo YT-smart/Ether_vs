@@ -98,6 +98,14 @@ h1 span {
   vertical-align: baseline;
 }
 
+.supportLine {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
 h2 {
   margin: 0;
   font-size: 18px;

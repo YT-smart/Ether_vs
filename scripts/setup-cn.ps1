@@ -136,4 +136,4 @@ Step "Verifying runtime"
 & $Python -c "import torch; print('torch', torch.__version__); print('cuda', torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU mode')"
 
 Write-Host ""
-Write-Host "Setup complete. Run start.bat or the Chinese launch bat to open the app." -ForegroundColor Green
+Write-Host "Setup complete. Run 启动.bat to open the app." -ForegroundColor Green
