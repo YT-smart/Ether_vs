@@ -11,22 +11,18 @@
 ## 使用方式
 
 1. 下载项目：
-   - Git 用户：`git clone https://github.com/YT-smart/Ether_dy.git`
+   - Git 用户：`git clone https://github.com/YT-smart/Ether_vs.git`
    - 非 Git 用户：在 GitHub 页面点击 `Code` -> `Download ZIP`，解压后使用
 2. 双击 `启动.bat`。
 3. 第一次启动会自动安装运行依赖并下载文案提取模型。
 4. 启动成功后会自动打开网页界面。
 5. 在网页里粘贴视频链接，点击 `下载原视频` 或 `提取文案`。
 
-如果浏览器没有自动打开，请手动访问：
-
-```text
-http://127.0.0.1:3666/
-```
+如果浏览器没有自动打开，请手动访问控制台输出的地址
 
 首次安装会下载模型和依赖，耗时取决于网络；后续启动会快很多。
 
-## 使用前需要
+## 使用环境
 
 - Windows 10/11
 - Python 3.11

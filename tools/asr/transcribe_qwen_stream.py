@@ -189,6 +189,19 @@ def extract_text(result) -> str:
     return str(result).strip()
 
 
+def join_transcript_parts(parts: list[str]) -> str:
+    merged = ""
+    for part in (part.strip() for part in parts if part and part.strip()):
+        if not merged:
+            merged = part
+            continue
+        if merged[-1:].isascii() and merged[-1:].isalnum() and part[:1].isascii() and part[:1].isalnum():
+            merged += " " + part
+        else:
+            merged += part
+    return merged.strip()
+
+
 def transcribe_chunk(asr, chunk: Path, language: str) -> str:
     results = asr.transcribe(audio=str(chunk), language=normalize_language(language))
     if not results:
@@ -235,11 +248,12 @@ def main() -> int:
 
     if args.output_json:
         Path(args.output_json).write_text(
-            json.dumps({"segments": segments, "text": "\n".join(text_lines)}, ensure_ascii=False, indent=2) + "\n",
+            json.dumps({"segments": segments, "text": join_transcript_parts(text_lines)}, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
     if args.output_text:
-        Path(args.output_text).write_text("\n".join(text_lines) + ("\n" if text_lines else ""), encoding="utf-8")
+        text = join_transcript_parts(text_lines)
+        Path(args.output_text).write_text(text + ("\n" if text else ""), encoding="utf-8")
 
     emit({"type": "complete", "segments": len(segments)})
     return 0

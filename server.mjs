@@ -392,6 +392,21 @@ function normalizeTranscript(text) {
     .trim();
 }
 
+function joinTranscriptParts(parts) {
+  return parts
+    .map((part) => normalizeTranscript(part || ""))
+    .filter(Boolean)
+    .reduce((merged, part) => {
+      if (!merged) return part;
+      const last = merged.slice(-1);
+      const first = part.slice(0, 1);
+      if (/[A-Za-z0-9]$/.test(last) && /^[A-Za-z0-9]/.test(first)) {
+        return `${merged} ${part}`;
+      }
+      return `${merged}${part}`;
+    }, "");
+}
+
 async function detectDevice() {
   const code = [
     "import json",
@@ -429,7 +444,6 @@ function createAsrWorker() {
       PYTHONUTF8: "1",
       PYTHONIOENCODING: "utf-8",
       HF_HOME: path.join(MODELS_DIR, "huggingface"),
-      TRANSFORMERS_CACHE: path.join(MODELS_DIR, "huggingface", "transformers"),
     },
   });
 
@@ -458,7 +472,9 @@ function createAsrWorker() {
           ...segment,
           text: normalizeTranscript(segment.text || ""),
         }));
-        const text = normalizeTranscript(segments.map((segment) => segment.text).join("\n") || event.text || "");
+        const text = joinTranscriptParts(
+          segments.length ? segments.map((segment) => segment.text) : [event.text || ""],
+        );
         fs.writeFileSync(job.transcriptPath, text + "\n", "utf8");
         fs.writeFileSync(
           job.transcriptJsonPath,

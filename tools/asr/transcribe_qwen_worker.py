@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from transcribe_qwen_stream import MODEL_IDS, load_qwen_model, split_audio, transcribe_chunk
+from transcribe_qwen_stream import MODEL_IDS, join_transcript_parts, load_qwen_model, split_audio, transcribe_chunk
 
 
 def emit(payload: dict) -> None:
@@ -49,7 +49,7 @@ def run_job(asr, payload: dict, chunk_seconds: int) -> None:
             "type": "done",
             "id": job_id,
             "segments": segments,
-            "text": "\n".join(text_lines),
+            "text": join_transcript_parts(text_lines),
         })
     except Exception as exc:  # noqa: BLE001
         emit({"type": "error", "id": job_id, "message": str(exc)})
