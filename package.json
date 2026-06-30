@@ -1,8 +1,8 @@
 {
-  "name": "douyin-copy-client",
+  "name": "video-copy-client",
   "version": "0.1.0",
   "private": true,
-  "description": "Local client for downloading Douyin videos and extracting speech copy.",
+  "description": "Local client for downloading videos and extracting speech copy.",
   "scripts": {
     "start": "node server.mjs"
   },

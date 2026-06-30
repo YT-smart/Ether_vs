@@ -6,6 +6,7 @@ const statusBox = document.querySelector("#statusBox");
 const statusText = document.querySelector("#statusText");
 const resultPanel = document.querySelector("#resultPanel");
 const resultTitle = document.querySelector("#resultTitle");
+const sourceBadge = document.querySelector("#sourceBadge");
 const resultBadge = document.querySelector("#resultBadge");
 const resultMeta = document.querySelector("#resultMeta");
 const mediaCard = document.querySelector("#mediaCard");
@@ -65,7 +66,7 @@ function getUrl() {
   const value = input.value.trim();
   if (!value) {
     input.focus();
-    throw new Error("请输入抖音链接");
+    throw new Error("请输入视频链接");
   }
   return value;
 }
@@ -73,6 +74,7 @@ function getUrl() {
 function resetResult(title, mode) {
   resultPanel.hidden = false;
   resultTitle.textContent = title;
+  sourceBadge.textContent = "video";
   resultMeta.textContent = "";
   resultMeta.hidden = true;
   resultBadge.textContent = mode === "text" ? "提取结果：原文" : "视频已解析";
@@ -96,10 +98,11 @@ function showVideo(data) {
   videoPreview.src = data.videoUrl;
   videoPreview.hidden = false;
   downloadVideoLink.href = data.videoUrl;
-  downloadVideoLink.setAttribute("download", data.videoName || "douyin-video.mp4");
+  downloadVideoLink.setAttribute("download", data.videoName || "video.mp4");
   downloadVideoLink.hidden = false;
   extractFromVideoBtn.hidden = false;
   resultTitle.textContent = data.title || "暂无标题";
+  sourceBadge.textContent = data.source || "video";
   resultMeta.textContent = "";
   resultMeta.hidden = true;
 }
@@ -162,6 +165,7 @@ async function extractCopy(activeButton = extractBtn) {
           title: event.video.title,
           videoPath: event.video.path,
           videoUrl: event.video.url,
+          source: event.video.source,
         });
       } else if (event.type === "progress") {
         setProgress(event.percent);

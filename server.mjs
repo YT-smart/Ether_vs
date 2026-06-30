@@ -3,7 +3,7 @@ import https from "node:https";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -11,6 +11,8 @@ const PUBLIC_DIR = path.join(ROOT, "public");
 const JOBS_DIR = path.join(ROOT, "work", "client-jobs");
 const CONFIG_PATH = path.join(ROOT, "work", "client-config.json");
 const DOUYIN_SCRIPT = path.join(ROOT, "tools", "douyin", "douyin.js");
+const PARSE_VIDEO_PY_DIR = path.join(ROOT, "tools", "parse-video-py");
+const PARSE_VIDEO_PY_BRIDGE = path.join(ROOT, "tools", "parse_video_py_bridge.py");
 const QWEN_WORKER_SCRIPT = path.join(ROOT, "tools", "asr", "transcribe_qwen_worker.py");
 const MODELS_DIR = path.join(ROOT, "models");
 const ASR_MODEL = "qwen3-asr-0.6b";
@@ -97,9 +99,14 @@ function readJson(req) {
   });
 }
 
-function run(command, args) {
+function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: ROOT, shell: false, windowsHide: true });
+    const child = spawn(command, args, {
+      cwd: options.cwd || ROOT,
+      shell: false,
+      windowsHide: true,
+      env: options.env || process.env,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
@@ -133,11 +140,17 @@ function parseInfo(stdout) {
   return { id, title: title || id, url };
 }
 
-function normalizeDouyinInput(value) {
+function extractHttpUrl(value) {
   const raw = String(value || "").trim();
   const match = raw.match(/https?:\/\/[^\s"'<>，。]+/i);
   const extracted = match ? match[0] : raw;
   if (!/^https?:\/\/.+/i.test(extracted)) return "";
+  return extracted;
+}
+
+function normalizeInputUrl(value) {
+  const extracted = extractHttpUrl(value);
+  if (!extracted) return "";
 
   try {
     const url = new URL(extracted);
@@ -151,9 +164,95 @@ function normalizeDouyinInput(value) {
   }
 }
 
-async function getVideoInfo(url) {
+function isDouyinUrl(value) {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+    return host.endsWith("douyin.com") || host.endsWith("iesdouyin.com");
+  } catch {
+    return false;
+  }
+}
+
+function shortHash(value) {
+  return createHash("sha1").update(String(value || "")).digest("hex").slice(0, 12);
+}
+
+function parseJsonOutput(stdout) {
+  const text = String(stdout || "").trim();
+  if (!text) throw new Error("parse-video returned empty output.");
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start >= 0 && end > start) {
+      return JSON.parse(text.slice(start, end + 1));
+    }
+    throw new Error(`Unable to parse parse-video output.\n${text}`);
+  }
+}
+
+async function getDouyinVideoInfo(url) {
   const result = await run("node", [DOUYIN_SCRIPT, "info", url]);
-  return parseInfo(result.stdout);
+  return { ...parseInfo(result.stdout), source: "douyin" };
+}
+
+async function getParseVideoInfo(url) {
+  if (!fs.existsSync(PARSE_VIDEO_PY_DIR) || !fs.existsSync(PARSE_VIDEO_PY_BRIDGE)) {
+    throw new Error("多平台解析引擎源码缺失，请确认 tools\\parse-video-py 已存在。");
+  }
+
+  let result;
+  try {
+    result = await run(PROJECT_PYTHON, [PARSE_VIDEO_PY_BRIDGE, url], {
+      env: {
+        ...process.env,
+        PYTHONUTF8: "1",
+        PYTHONIOENCODING: "utf-8",
+      },
+    });
+  } catch (error) {
+    let bridgeMessage = "";
+    try {
+      const parsed = JSON.parse(String(error.stderr || error.message || "").trim());
+      bridgeMessage = parsed.error || "";
+    } catch {
+      bridgeMessage = "";
+    }
+    if (bridgeMessage) throw new Error(bridgeMessage);
+    throw error;
+  }
+  const info = parseJsonOutput(result.stdout);
+  const videoUrl = info.video_url || info.videoUrl || info.url || "";
+  if (!videoUrl) {
+    throw new Error("这个链接没有解析出可下载的视频地址，可能是图集、平台规则变化，或链接需要登录。");
+  }
+  const title = info.title || info.desc || "video";
+  return {
+    id: shortHash(videoUrl || url),
+    title,
+    url: videoUrl,
+    coverUrl: info.cover_url || "",
+    musicUrl: info.music_url || "",
+    author: info.author || null,
+    source: "parse-video-py",
+    raw: info,
+  };
+}
+
+async function getVideoInfo(url) {
+  if (fs.existsSync(PARSE_VIDEO_PY_DIR)) {
+    try {
+      return await getParseVideoInfo(url);
+    } catch (error) {
+      if (!isDouyinUrl(url)) throw error;
+      console.warn(`parse-video-py failed, falling back to douyin parser: ${error.message}`);
+    }
+  } else if (!isDouyinUrl(url)) {
+    throw new Error("多平台解析引擎源码缺失。当前只能解析抖音链接。");
+  }
+
+  return getDouyinVideoInfo(url);
 }
 
 function downloadUrl(fileUrl, destination) {
@@ -358,8 +457,8 @@ async function ensureAsrWorker() {
 
 async function ensureDownloaded(inputUrl) {
   const saveDir = ensureDefaultStorage();
-  const normalizedUrl = normalizeDouyinInput(inputUrl);
-  if (!normalizedUrl) throw new Error("请输入有效的抖音链接。");
+  const normalizedUrl = normalizeInputUrl(inputUrl);
+  if (!normalizedUrl) throw new Error("请输入有效的视频链接。");
 
   const cached = cacheByInput.get(normalizedUrl);
   if (cached && fs.existsSync(cached.videoPath)) {
@@ -378,10 +477,14 @@ async function ensureDownloaded(inputUrl) {
     inputUrl: normalizedUrl,
     title: info.title,
     videoId: info.id,
+    source: info.source,
     videoName,
     videoPath,
     videoUrl: registerFile(videoPath),
     sourceUrl: info.url,
+    coverUrl: info.coverUrl || "",
+    musicUrl: info.musicUrl || "",
+    raw: info.raw || null,
     saveDir,
   };
   cacheByInput.set(normalizedUrl, result);
@@ -390,9 +493,9 @@ async function ensureDownloaded(inputUrl) {
 
 async function handleDownload(req, res) {
   const body = await readJson(req);
-  const url = normalizeDouyinInput(body.url);
+  const url = normalizeInputUrl(body.url);
   if (!url) {
-    send(res, 400, { error: "请输入有效的抖音链接。" });
+    send(res, 400, { error: "请输入有效的视频链接。" });
     return;
   }
   send(res, 200, await ensureDownloaded(url));
@@ -400,9 +503,9 @@ async function handleDownload(req, res) {
 
 async function handleExtractStream(req, res) {
   const body = await readJson(req);
-  const inputUrl = normalizeDouyinInput(body.url);
+  const inputUrl = normalizeInputUrl(body.url);
   if (!inputUrl) {
-    send(res, 400, { error: "请输入有效的抖音链接。" });
+    send(res, 400, { error: "请输入有效的视频链接。" });
     return;
   }
 
@@ -425,6 +528,7 @@ async function handleExtractStream(req, res) {
         title: downloaded.title,
         path: downloaded.videoPath,
         url: downloaded.videoUrl,
+        source: downloaded.source,
       },
     });
     sendLine(res, { type: "progress", percent: 6 });
@@ -497,26 +601,37 @@ function serveStatic(req, res) {
 }
 
 const server = http.createServer((req, res) => {
+  const handleError = (error) => {
+    if (!res.headersSent) {
+      send(res, 500, { error: error.message || "操作失败" });
+      return;
+    }
+    if (!res.writableEnded) {
+      sendLine(res, { type: "error", message: error.message || "操作失败" });
+      res.end();
+    }
+  };
+
   try {
     if (req.method === "GET" && req.url === "/api/device") {
-      detectDevice().then((info) => send(res, 200, info));
+      detectDevice().then((info) => send(res, 200, info)).catch(handleError);
     } else if (req.method === "POST" && req.url === "/api/download") {
-      handleDownload(req, res);
+      handleDownload(req, res).catch(handleError);
     } else if (req.method === "POST" && req.url === "/api/extract-stream") {
-      handleExtractStream(req, res);
+      handleExtractStream(req, res).catch(handleError);
     } else if (req.method === "GET") {
       serveStatic(req, res);
     } else {
       send(res, 405, { error: "Method not allowed" });
     }
   } catch (error) {
-    send(res, 500, { error: error.message || "操作失败" });
+    handleError(error);
   }
 });
 
 server.listen(PORT, () => {
   const config = writeConfig(readConfig());
-  console.log(`Douyin Copy Client running at http://localhost:${PORT}`);
+  console.log(`Video Copy Client running at http://localhost:${PORT}`);
   console.log(`Default save directory: ${config.saveDir}`);
 });
 

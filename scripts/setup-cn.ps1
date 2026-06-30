@@ -85,7 +85,14 @@ Step "Installing Python packages from Tsinghua mirror"
   "librosa" `
   "soundfile" `
   "numpy" `
-  "scipy"
+  "scipy" `
+  "aiohttp>=3.9" `
+  "fake-useragent>=1.5" `
+  "lxml>=5.0" `
+  "parsel>=1.9" `
+  "httpx>=0.27" `
+  "jmespath>=1.0" `
+  "pyyaml>=6.0"
 
 & $Python -m pip install `
   -i $PipIndex `

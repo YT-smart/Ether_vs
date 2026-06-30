@@ -3,6 +3,7 @@ $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 $ModelFile = Join-Path $Root "models\huggingface\Qwen3-ASR-0.6B\model.safetensors"
 $Setup = Join-Path $Root "scripts\setup-cn.ps1"
+$ParseVideoPySrc = Join-Path $Root "tools\parse-video-py\src"
 
 function Need-Setup {
   if (!(Test-Path $Python)) {
@@ -26,8 +27,18 @@ import accelerate
 import librosa
 import soundfile
 from qwen_asr import Qwen3ASRModel
+sys.path.insert(0, r"__PARSE_VIDEO_PY_SRC__")
+import aiohttp
+import fake_useragent
+import httpx
+import jmespath
+import lxml
+import parsel
+import yaml
+from parse_video_py import parse_video_share_url
 print("ok")
 '@
+  $check = $check.Replace("__PARSE_VIDEO_PY_SRC__", $ParseVideoPySrc.Replace("\", "\\"))
 
   try {
     $output = $check | & $Python -

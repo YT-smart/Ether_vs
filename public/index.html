@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>抖音视频工具 by 以太Max</title>
+    <title>视频文案工具 by 以太Max</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -18,7 +18,7 @@
         </div>
 
         <header class="header">
-          <h1>抖音视频工具 <span>by 以太Max</span></h1>
+          <h1>视频文案工具 <span>by 以太Max</span></h1>
         </header>
 
         <form class="inputRow" id="toolForm">
@@ -27,7 +27,7 @@
             name="url"
             type="text"
             autocomplete="off"
-            placeholder="粘贴抖音链接或分享文案"
+            placeholder="粘贴抖音/小红书/B站等视频链接或分享文案"
             required
           />
         </form>
@@ -51,7 +51,7 @@
         <section class="result" id="resultPanel" hidden>
           <div class="summaryCard" id="summaryCard">
             <div class="badges">
-              <span class="badge">douyin</span>
+              <span class="badge" id="sourceBadge">video</span>
               <span class="badge purple" id="resultBadge">已解析</span>
             </div>
             <h2 id="resultTitle">结果</h2>
