@@ -41,6 +41,36 @@ let asrWorkerReady = false;
 let asrWorkerStarting = null;
 const asrJobs = new Map();
 
+function removeAsrJob(id) {
+  const job = asrJobs.get(id);
+  job?.signal?.removeEventListener("abort", job.abortJob);
+  asrJobs.delete(id);
+}
+
+function createAbortError(message = "已取消") {
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError" || error?.code === "ABORT_ERR";
+}
+
+function throwIfAborted(signal) {
+  if (signal?.aborted) throw createAbortError();
+}
+
+function requestSignal(req, res) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  req.on("aborted", abort);
+  res.on("close", () => {
+    if (!res.writableEnded) abort();
+  });
+  return controller.signal;
+}
+
 function defaultConfig() {
   return {
     saveDir: path.join(ROOT, "downloads"),
@@ -79,6 +109,7 @@ function send(res, status, body, type = "application/json; charset=utf-8") {
 }
 
 function sendLine(res, payload) {
+  if (res.destroyed || res.writableEnded) return;
   res.write(`${JSON.stringify(payload)}\n`);
 }
 
@@ -101,6 +132,10 @@ function readJson(req) {
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
     const child = spawn(command, args, {
       cwd: options.cwd || ROOT,
       shell: false,
@@ -109,16 +144,30 @@ function run(command, args, options = {}) {
     });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const cleanup = () => options.signal?.removeEventListener("abort", abort);
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const abort = () => {
+      child.kill();
+      settle(reject, createAbortError());
+    };
+    options.signal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
-    child.on("error", reject);
+    child.on("error", (error) => settle(reject, error));
     child.on("close", (code) => {
-      if (code === 0) resolve({ stdout, stderr });
+      if (settled) return;
+      if (code === 0) settle(resolve, { stdout, stderr });
       else {
         const error = new Error((stderr || stdout || `Command failed with code ${code}`).trim());
         error.stdout = stdout;
         error.stderr = stderr;
-        reject(error);
+        settle(reject, error);
       }
     });
   });
@@ -192,12 +241,12 @@ function parseJsonOutput(stdout) {
   }
 }
 
-async function getDouyinVideoInfo(url) {
-  const result = await run("node", [DOUYIN_SCRIPT, "info", url]);
+async function getDouyinVideoInfo(url, signal) {
+  const result = await run("node", [DOUYIN_SCRIPT, "info", url], { signal });
   return { ...parseInfo(result.stdout), source: "douyin" };
 }
 
-async function getParseVideoInfo(url) {
+async function getParseVideoInfo(url, signal) {
   if (!fs.existsSync(PARSE_VIDEO_PY_DIR) || !fs.existsSync(PARSE_VIDEO_PY_BRIDGE)) {
     throw new Error("多平台解析引擎源码缺失，请确认 tools\\parse-video-py 已存在。");
   }
@@ -210,8 +259,10 @@ async function getParseVideoInfo(url) {
         PYTHONUTF8: "1",
         PYTHONIOENCODING: "utf-8",
       },
+      signal,
     });
   } catch (error) {
+    if (isAbortError(error)) throw error;
     let bridgeMessage = "";
     try {
       const parsed = JSON.parse(String(error.stderr || error.message || "").trim());
@@ -240,11 +291,12 @@ async function getParseVideoInfo(url) {
   };
 }
 
-async function getVideoInfo(url) {
+async function getVideoInfo(url, signal) {
   if (fs.existsSync(PARSE_VIDEO_PY_DIR)) {
     try {
-      return await getParseVideoInfo(url);
+      return await getParseVideoInfo(url, signal);
     } catch (error) {
+      if (isAbortError(error)) throw error;
       if (!isDouyinUrl(url)) throw error;
       console.warn(`parse-video-py failed, falling back to douyin parser: ${error.message}`);
     }
@@ -252,14 +304,36 @@ async function getVideoInfo(url) {
     throw new Error("多平台解析引擎源码缺失。当前只能解析抖音链接。");
   }
 
-  return getDouyinVideoInfo(url);
+  return getDouyinVideoInfo(url, signal);
 }
 
-function downloadUrl(fileUrl, destination) {
+function downloadUrl(fileUrl, destination, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     const client = fileUrl.startsWith("https:") ? https : http;
-    const request = client.get(fileUrl, {
+    let file = null;
+    let request = null;
+    let settled = false;
+    const cleanup = () => signal?.removeEventListener("abort", abort);
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn(value);
+    };
+    const abort = () => {
+      request?.destroy(createAbortError());
+      file?.destroy();
+      try { fs.rmSync(destination, { force: true }); } catch {}
+      settle(reject, createAbortError());
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+
+    request = client.get(fileUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         "Accept": "*/*",
@@ -267,21 +341,25 @@ function downloadUrl(fileUrl, destination) {
       },
     }, (response) => {
       if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        downloadUrl(response.headers.location, destination).then(resolve, reject);
+        response.resume();
+        downloadUrl(response.headers.location, destination, signal).then(
+          (value) => settle(resolve, value),
+          (error) => settle(reject, error),
+        );
         return;
       }
       if (response.statusCode !== 200) {
-        reject(new Error(`Video download failed with HTTP ${response.statusCode}`));
+        settle(reject, new Error(`Video download failed with HTTP ${response.statusCode}`));
         response.resume();
         return;
       }
-      const file = fs.createWriteStream(destination);
+      file = fs.createWriteStream(destination);
       response.pipe(file);
-      file.on("finish", () => file.close(resolve));
-      file.on("error", reject);
+      file.on("finish", () => file.close(() => settle(resolve)));
+      file.on("error", (error) => settle(reject, error));
     });
     request.setTimeout(120000, () => request.destroy(new Error("Video download timed out.")));
-    request.on("error", reject);
+    request.on("error", (error) => settle(reject, error));
   });
 }
 
@@ -397,11 +475,11 @@ function createAsrWorker() {
           videoPath: job.downloaded.videoPath,
         });
         job.res.end();
-        asrJobs.delete(event.id);
+        removeAsrJob(event.id);
       } else if (event.type === "error") {
         sendLine(job.res, { type: "error", message: event.message || "提取失败" });
         job.res.end();
-        asrJobs.delete(event.id);
+        removeAsrJob(event.id);
       }
     }
   });
@@ -416,6 +494,7 @@ function createAsrWorker() {
     asrWorkerReady = false;
     asrWorkerStarting = null;
     for (const job of asrJobs.values()) {
+      job.signal?.removeEventListener("abort", job.abortJob);
       sendLine(job.res, { type: "error", message: "文案提取服务已退出，请重试。" });
       job.res.end();
     }
@@ -455,7 +534,8 @@ async function ensureAsrWorker() {
   return asrWorkerStarting;
 }
 
-async function ensureDownloaded(inputUrl) {
+async function ensureDownloaded(inputUrl, signal) {
+  throwIfAborted(signal);
   const saveDir = ensureDefaultStorage();
   const normalizedUrl = normalizeInputUrl(inputUrl);
   if (!normalizedUrl) throw new Error("请输入有效的视频链接。");
@@ -465,12 +545,14 @@ async function ensureDownloaded(inputUrl) {
     return cached;
   }
 
-  const info = await getVideoInfo(normalizedUrl);
+  const info = await getVideoInfo(normalizedUrl, signal);
+  throwIfAborted(signal);
   const videoName = `${sanitizeName(info.title)}_${info.id}.mp4`;
   const videoPath = path.join(saveDir, videoName);
   if (!fs.existsSync(videoPath)) {
-    await downloadUrl(info.url, videoPath);
+    await downloadUrl(info.url, videoPath, signal);
   }
+  throwIfAborted(signal);
 
   const result = {
     status: "ok",
@@ -492,16 +574,23 @@ async function ensureDownloaded(inputUrl) {
 }
 
 async function handleDownload(req, res) {
+  const signal = requestSignal(req, res);
   const body = await readJson(req);
   const url = normalizeInputUrl(body.url);
   if (!url) {
     send(res, 400, { error: "请输入有效的视频链接。" });
     return;
   }
-  send(res, 200, await ensureDownloaded(url));
+  try {
+    send(res, 200, await ensureDownloaded(url, signal));
+  } catch (error) {
+    if (isAbortError(error)) return;
+    throw error;
+  }
 }
 
 async function handleExtractStream(req, res) {
+  const signal = requestSignal(req, res);
   const body = await readJson(req);
   const inputUrl = normalizeInputUrl(body.url);
   if (!inputUrl) {
@@ -517,7 +606,8 @@ async function handleExtractStream(req, res) {
 
   try {
     sendLine(res, { type: "progress", percent: 3 });
-    const downloaded = await ensureDownloaded(inputUrl);
+    const downloaded = await ensureDownloaded(inputUrl, signal);
+    throwIfAborted(signal);
     const saveDir = ensureDefaultStorage();
     const transcriptPath = path.join(saveDir, `${path.basename(downloaded.videoPath, ".mp4")}.txt`);
     const transcriptJsonPath = path.join(saveDir, `${path.basename(downloaded.videoPath, ".mp4")}.segments.json`);
@@ -533,8 +623,16 @@ async function handleExtractStream(req, res) {
     });
     sendLine(res, { type: "progress", percent: 6 });
     const worker = await ensureAsrWorker();
+    throwIfAborted(signal);
     const id = randomUUID();
-    asrJobs.set(id, { res, downloaded, transcriptPath, transcriptJsonPath });
+    const abortJob = () => {
+      removeAsrJob(id);
+      if (asrWorker && !asrWorker.killed) {
+        asrWorker.kill();
+      }
+    };
+    signal.addEventListener("abort", abortJob, { once: true });
+    asrJobs.set(id, { res, downloaded, transcriptPath, transcriptJsonPath, signal, abortJob });
     worker.stdin.write(JSON.stringify({
       type: "transcribe",
       id,
@@ -542,6 +640,7 @@ async function handleExtractStream(req, res) {
       language: "zh",
     }) + "\n");
   } catch (error) {
+    if (isAbortError(error)) return;
     sendLine(res, { type: "error", message: error.message || "操作失败" });
     res.end();
   }

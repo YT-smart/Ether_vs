@@ -4,10 +4,9 @@ const downloadBtn = document.querySelector("#downloadBtn");
 const extractBtn = document.querySelector("#extractBtn");
 const statusBox = document.querySelector("#statusBox");
 const statusText = document.querySelector("#statusText");
+const cancelBtn = document.querySelector("#cancelBtn");
 const resultPanel = document.querySelector("#resultPanel");
 const resultTitle = document.querySelector("#resultTitle");
-const sourceBadge = document.querySelector("#sourceBadge");
-const resultBadge = document.querySelector("#resultBadge");
 const resultMeta = document.querySelector("#resultMeta");
 const mediaCard = document.querySelector("#mediaCard");
 const mediaSkeleton = document.querySelector("#mediaSkeleton");
@@ -21,6 +20,7 @@ const progressPercent = document.querySelector("#progressPercent");
 
 let busy = false;
 let currentVideo = null;
+let currentAbort = null;
 
 function setButtonsDisabled(disabled) {
   busy = disabled;
@@ -40,12 +40,17 @@ function setProgress(percent) {
 }
 
 function startTask(message, activeButton) {
+  currentAbort = new AbortController();
   setButtonsDisabled(true);
+  cancelBtn.hidden = false;
   activeButton?.classList.add("loading");
   setStatus("busy", message);
+  return currentAbort;
 }
 
 function finishTask(message) {
+  currentAbort = null;
+  cancelBtn.hidden = true;
   downloadBtn.classList.remove("loading");
   extractBtn.classList.remove("loading");
   extractFromVideoBtn.classList.remove("loading");
@@ -54,12 +59,26 @@ function finishTask(message) {
 }
 
 function failTask(message) {
+  currentAbort = null;
+  cancelBtn.hidden = true;
   downloadBtn.classList.remove("loading");
   extractBtn.classList.remove("loading");
   extractFromVideoBtn.classList.remove("loading");
   extractOverlay.hidden = true;
   setButtonsDisabled(false);
   setStatus("error", message || "操作失败");
+}
+
+function cancelTask() {
+  currentAbort?.abort();
+  currentAbort = null;
+  cancelBtn.hidden = true;
+  downloadBtn.classList.remove("loading");
+  extractBtn.classList.remove("loading");
+  extractFromVideoBtn.classList.remove("loading");
+  extractOverlay.hidden = true;
+  setButtonsDisabled(false);
+  setStatus("success", "已取消");
 }
 
 function getUrl() {
@@ -74,10 +93,8 @@ function getUrl() {
 function resetResult(title, mode) {
   resultPanel.hidden = false;
   resultTitle.textContent = title;
-  sourceBadge.textContent = "video";
   resultMeta.textContent = "";
   resultMeta.hidden = true;
-  resultBadge.textContent = mode === "text" ? "提取结果：原文" : "视频已解析";
   copyBtn.hidden = true;
   copyText.value = "";
   copyText.placeholder = mode === "text" ? "" : "提取文案后会显示在这里";
@@ -102,16 +119,16 @@ function showVideo(data) {
   downloadVideoLink.hidden = false;
   extractFromVideoBtn.hidden = false;
   resultTitle.textContent = data.title || "暂无标题";
-  sourceBadge.textContent = data.source || "video";
   resultMeta.textContent = "";
   resultMeta.hidden = true;
 }
 
-async function postJson(route, payload) {
+async function postJson(route, payload, signal) {
   const response = await fetch(route, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   const data = await response.json();
   if (!response.ok) {
@@ -121,9 +138,9 @@ async function postJson(route, payload) {
 }
 
 async function downloadVideo() {
-  startTask("正在下载视频", downloadBtn);
+  const controller = startTask("正在下载视频", downloadBtn);
   resetResult("下载中", "download");
-  const data = await postJson("/api/download", { url: getUrl() });
+  const data = await postJson("/api/download", { url: getUrl() }, controller.signal);
   showVideo(data);
   copyText.value = "";
   copyText.placeholder = "提取文案后会显示在这里";
@@ -131,7 +148,7 @@ async function downloadVideo() {
 }
 
 async function extractCopy(activeButton = extractBtn) {
-  startTask("正在提取文案", activeButton);
+  const controller = startTask("正在提取文案", activeButton);
   resetResult("文案提取中", "text");
   extractOverlay.hidden = false;
   setProgress(0);
@@ -140,6 +157,7 @@ async function extractCopy(activeButton = extractBtn) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url: getUrl() }),
+    signal: controller.signal,
   });
   if (!response.ok || !response.body) {
     const data = await response.json().catch(() => ({}));
@@ -176,7 +194,6 @@ async function extractCopy(activeButton = extractBtn) {
         copyText.placeholder = "暂无文案";
         if (event.videoUrl && currentVideo) showVideo({ ...currentVideo, videoUrl: event.videoUrl });
         resultTitle.textContent = currentVideo?.title || "文案提取结果";
-        resultBadge.textContent = "提取结果：原文";
         copyBtn.hidden = !copyText.value.trim();
         completed = true;
         finishTask("提取完成");
@@ -197,6 +214,7 @@ downloadBtn.addEventListener("click", async () => {
   try {
     await downloadVideo();
   } catch (error) {
+    if (error.name === "AbortError") return;
     failTask(error.message);
   }
 });
@@ -205,6 +223,7 @@ extractBtn.addEventListener("click", async () => {
   try {
     await extractCopy();
   } catch (error) {
+    if (error.name === "AbortError") return;
     failTask(error.message);
   }
 });
@@ -213,9 +232,12 @@ extractFromVideoBtn.addEventListener("click", async () => {
   try {
     await extractCopy(extractFromVideoBtn);
   } catch (error) {
+    if (error.name === "AbortError") return;
     failTask(error.message);
   }
 });
+
+cancelBtn.addEventListener("click", cancelTask);
 
 copyBtn.addEventListener("click", async () => {
   await navigator.clipboard.writeText(copyText.value);

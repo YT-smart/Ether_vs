@@ -47,14 +47,12 @@
         <section class="status" id="statusBox" aria-live="polite">
           <span class="pulse"></span>
           <span id="statusText">就绪</span>
+          <button class="cancelBtn" id="cancelBtn" type="button" hidden>取消</button>
         </section>
 
         <section class="result" id="resultPanel" hidden>
           <div class="summaryCard" id="summaryCard">
-            <div class="badges">
-              <span class="badge" id="sourceBadge">video</span>
-              <span class="badge purple" id="resultBadge">已解析</span>
-            </div>
+            <span class="titleLabel">标题</span>
             <h2 id="resultTitle">结果</h2>
             <p id="resultMeta">等待处理</p>
           </div>
