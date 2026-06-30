@@ -85,8 +85,7 @@ Step "Installing Python packages from Tsinghua mirror"
   "librosa" `
   "soundfile" `
   "numpy" `
-  "scipy" `
-  "modelscope"
+  "scipy"
 
 & $Python -m pip install `
   -i $PipIndex `
@@ -115,6 +114,7 @@ Step "Downloading Qwen3-ASR 0.6B model"
 if (!(Test-Path (Join-Path $ModelDir "model.safetensors"))) {
   New-Item -ItemType Directory -Force -Path $ModelDir | Out-Null
   try {
+    & $Python -m pip install -i $PipIndex --timeout 300 --retries 5 "modelscope"
     & $Python -m modelscope download --model Qwen/Qwen3-ASR-0.6B --local_dir $ModelDir
   } catch {
     Warn "ModelScope download failed. Trying HuggingFace mirror."

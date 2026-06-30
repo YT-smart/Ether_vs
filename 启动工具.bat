@@ -9,8 +9,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist ".venv\Scripts\python.exe" (
-  echo 未找到 Python 运行环境，请先双击 安装依赖.bat。
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ensure-env.ps1"
+if errorlevel 1 (
+  echo 运行环境安装失败，请查看上方提示。
   pause
   exit /b 1
 )

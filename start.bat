@@ -9,8 +9,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
-if not exist ".venv\Scripts\python.exe" (
-  echo Python runtime was not found. Please run install.bat first.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\ensure-env.ps1"
+if errorlevel 1 (
+  echo Runtime setup failed. Please check the messages above.
   pause
   exit /b 1
 )
